@@ -1,18 +1,3 @@
-"""
-Data cleaning workflow for the video game sales project.
-
-Running `py main.py`:
-1. Fetches the raw dataset with KaggleHub if vgsales.csv is missing.
-2. Loads the original data and records the "before" snapshot.
-3. Cleans in memory using the approved decisions in src/data_cleaning.py.
-4. Runs all in-memory validation checks before writing anything.
-5. Stages outputs under temporary ".pending" names.
-6. Reloads the staged files and verifies their contents.
-7. Publishes to the final names, with rollback if publication fails.
-
-A failed run removes its staged files and leaves existing outputs unchanged.
-"""
-
 import pandas as pd
 
 from src.data_cleaning import (

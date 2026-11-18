@@ -1,35 +1,8 @@
-"""Data cleaning module: raw vgsales.csv -> cleaned dataset + reports.
-
-Applies only the approved cleaning decisions listed below. The raw
-dataset is never modified; outputs go to data/processed/ and
-outputs/cleaning_reports/.
-
-Approved decisions (from the Stage A audit):
-
-1. Remove Rank 16130 (Madden NFL 13, PS3): duplicate game+platform record
-   with conflicting sales figures, not an exact duplicate. Keep Rank 604.
-2. Quarantine Rank 4147 (Sonic the Hedgehog, PS3) into
-   outputs/cleaning_reports/records_requiring_review.csv: EU_Sales (0.48)
-   conflicts with retained Rank 1717 (0.07); Year and Publisher missing.
-3. Remove Rank 15002 (Wii de Asobu: Metroid Prime, Wii): exact duplicate
-   of Rank 15000 in every field except Rank.
-4. Retain the four records dated 2017/2020; Year values are as provided by
-   the source and not independently verified.
-5. Keep rows with missing Year or Publisher; never invent or fill values.
-6. Convert Year to nullable Int64, preserving missing values.
-7. Never recalculate Global_Sales or regional sales. Differences up to
-   0.02M between Global_Sales and the regional sum are rounding.
-8. Zero sales stay zero; they are not missing data.
-9. Keep the original column names.
-"""
-
 import os
-import glob
-import shutil
 
 import pandas as pd
 
-# Data cleaning constants (paths, approved decisions).
+# Data cleaning constants 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 RAW_DATA_PATH = os.path.join(PROJECT_ROOT, "data", "raw", "vgsales.csv")
@@ -76,55 +49,12 @@ RANKS_TO_QUARANTINE = {
 }
 
 
-def fetch_raw_data(dataset_id="gregorut/videogamesales"):
-    """Download the dataset with KaggleHub into data/raw/ if vgsales.csv is missing."""
-    os.makedirs(os.path.dirname(RAW_DATA_PATH), exist_ok=True)
-
-    if os.path.exists(RAW_DATA_PATH):
-        print(f"Raw dataset already present: {RAW_DATA_PATH} (nothing re-downloaded)")
-        return RAW_DATA_PATH
-
-    # Other CSVs in data/raw/ are left untouched; only vgsales.csv is fetched.
-    unexpected_csvs = glob.glob(os.path.join(os.path.dirname(RAW_DATA_PATH), "*.csv"))
-    if unexpected_csvs:
-        print("vgsales.csv is missing, but other CSV file(s) exist in data/raw/:")
-        for path in unexpected_csvs:
-            print("  -", os.path.basename(path))
-        print("They are left untouched; fetching only the missing vgsales.csv...")
-
-    import kagglehub  # pandas-only use does not need kagglehub
-
-    print(f"Downloading dataset '{dataset_id}' with KaggleHub...")
-    dataset_dir = kagglehub.dataset_download(dataset_id)
-
-    # KaggleHub may return a cached directory; never assume the file name.
-    csv_files = glob.glob(
-        os.path.join(dataset_dir, "**", "*.csv"), recursive=True
-    )
-    if not csv_files:
-        raise FileNotFoundError(
-            "KaggleHub returned a directory with no CSV files: " + str(dataset_dir)
-        )
-
-    csv_files.sort(key=lambda path: os.path.getsize(path), reverse=True)
-    source_csv = csv_files[0]
-
-    if os.path.exists(RAW_DATA_PATH):
-        print("Raw dataset already present (nothing re-downloaded)")
-        return RAW_DATA_PATH
-
-    shutil.copy2(source_csv, RAW_DATA_PATH)
-    print(f"Copied {os.path.basename(source_csv)} into data/raw/")
-    return RAW_DATA_PATH
-
-
 def load_data(path=RAW_DATA_PATH):
-    """Load the raw dataset and validate that all required columns exist."""
+    """Load the raw dataset."""
     if not os.path.exists(path):
         raise FileNotFoundError(
             f"Raw dataset not found at: {path}\n"
-            "Run main.py first (it downloads the dataset with KaggleHub) "
-            "or place the original CSV in data/raw/ yourself."
+            
         )
 
     df = pd.read_csv(path)
@@ -184,11 +114,7 @@ def verify_rank_uniqueness(df):
 
 
 def quarantine_records(df):
-    """Split off the approved review records; returns (remaining, review).
-
-    Quarantined records are not deleted; they are saved separately for
-    human review.
-    """
+ 
     review_mask = df["Rank"].isin(RANKS_TO_QUARANTINE)
     review_records = df[review_mask].copy()
     remaining = df[~review_mask].copy()
@@ -430,7 +356,7 @@ def write_cleaning_report(
     lines = []
     lines.append("# Cleaning Report - Video Game Sales (Member 1)")
     lines.append("")
-    lines.append("Source: `data/raw/vgsales.csv` (original KaggleHub download, unmodified).")
+    lines.append("Source: `data/raw/vgsales.csv` (original download, unmodified).")
     lines.append(f"Outputs: `data/processed/vgsales_cleaned.csv`, `{os.path.basename(REVIEW_FILE_PATH)}`.")
     lines.append("")
     lines.append("## 1. Before / after summary")
