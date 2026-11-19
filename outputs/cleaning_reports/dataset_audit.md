@@ -1,6 +1,6 @@
 # Dataset Audit Report - Video Game Sales (vgsales.csv)
 
-Source file: `vgsales.csv` (downloaded via KaggleHub, copied from KaggleHub cache into `data/raw/`)
+Source file: `vgsales.csv`
 
 ## 1. Structure
 - Rows: **16598**

@@ -1,17 +1,11 @@
-import os
-
 import pandas as pd
 
-# Data cleaning constants 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-RAW_DATA_PATH = os.path.join(PROJECT_ROOT, "data", "raw", "vgsales.csv")
-CLEANED_DATA_PATH = os.path.join(
-    PROJECT_ROOT, "data", "processed", "vgsales_cleaned.csv"
-)
-REPORTS_DIR = os.path.join(PROJECT_ROOT, "outputs", "cleaning_reports")
-REVIEW_FILE_PATH = os.path.join(REPORTS_DIR, "records_requiring_review.csv")
-CLEANING_REPORT_PATH = os.path.join(REPORTS_DIR, "cleaning_report.md")
+# Data cleaning constants.
+RAW_DATA_PATH = "data/raw/vgsales.csv"
+CLEANED_DATA_PATH = "data/processed/vgsales_cleaned.csv"
+REVIEW_FILE_PATH = "outputs/cleaning_reports/records_requiring_review.csv"
+CLEANING_REPORT_PATH = "outputs/cleaning_reports/cleaning_report.md"
+REVIEW_FILE_NAME = REVIEW_FILE_PATH.split("/")[-1]
 
 REQUIRED_COLUMNS = [
     "Rank", "Name", "Platform", "Year", "Genre", "Publisher",
@@ -50,14 +44,13 @@ RANKS_TO_QUARANTINE = {
 
 
 def load_data(path=RAW_DATA_PATH):
-    """Load the raw dataset."""
-    if not os.path.exists(path):
+    """Load the raw dataset from data/raw/vgsales.csv and validate its columns."""
+    try:
+        df = pd.read_csv(path)
+    except FileNotFoundError:
         raise FileNotFoundError(
             f"Raw dataset not found at: {path}\n"
-            
         )
-
-    df = pd.read_csv(path)
 
     missing_columns = [
         column for column in REQUIRED_COLUMNS if column not in df.columns
@@ -72,11 +65,8 @@ def load_data(path=RAW_DATA_PATH):
 
 
 def inspect_data(df):
-    """Return shape, dtype, missing, duplicate and sales-column statistics.
-
-    Used for the before and after snapshots, so report numbers are always
-    computed the same way.
-    """
+    """Return shape, dtype, missing, duplicate and sales-column statistics,
+    computed the same way for the before and after snapshots."""
     return {
         "rows": len(df),
         "columns": list(df.columns),
@@ -114,7 +104,7 @@ def verify_rank_uniqueness(df):
 
 
 def quarantine_records(df):
- 
+    """Split off the approved review records; returns (remaining, review)."""
     review_mask = df["Rank"].isin(RANKS_TO_QUARANTINE)
     review_records = df[review_mask].copy()
     remaining = df[~review_mask].copy()
@@ -193,10 +183,7 @@ def validate_sales_columns(df):
 
 
 def check_categorical_labels(df):
-    """Report whitespace and case-variant issues in Genre/Platform/Publisher.
-
-    Labels are only reported, never rewritten.
-    """
+    """Report whitespace and case-variant issues in Genre/Platform/Publisher."""
     findings = {}
     for column in ["Genre", "Platform", "Publisher"]:
         values = df[column].dropna().astype(str)
@@ -257,18 +244,16 @@ def clean_data(df):
 
 
 def save_cleaned_data(df, path=CLEANED_DATA_PATH):
-    """Save the cleaned dataset under data/processed/ (never the raw file).
+    """Save the cleaned dataset under data/processed/.
 
     Missing years export as empty cells because CSV does not carry dtypes.
     """
-    if os.path.abspath(path) == os.path.abspath(RAW_DATA_PATH):
+    normalized = path.replace("\\", "/")
+    if normalized == RAW_DATA_PATH:
         raise ValueError("Refusing to overwrite the raw dataset.")
-    # Include the separator so sibling folders are not accepted by the prefix.
-    processed_dir = os.path.join(PROJECT_ROOT, "data", "processed") + os.sep
-    if not os.path.abspath(path).startswith(processed_dir):
+    if not normalized.startswith("data/processed/"):
         raise ValueError("Cleaned data must be saved under data/processed/.")
 
-    os.makedirs(os.path.dirname(path), exist_ok=True)
     df.to_csv(path, index=False)
     print(f"Cleaned dataset written to: {path} ({len(df)} rows)")
     return path
@@ -276,7 +261,6 @@ def save_cleaned_data(df, path=CLEANED_DATA_PATH):
 
 def save_review_records(review_records, path=REVIEW_FILE_PATH):
     """Save quarantined records to outputs/cleaning_reports/ for review."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
     review_records.to_csv(path, index=False)
     print(f"Review records written to: {path} ({len(review_records)} rows)")
     return path
@@ -350,14 +334,13 @@ def write_cleaning_report(
     """Write the Markdown cleaning report: before/after statistics, a
     record-level explanation of every affected row, reconciliation and
     limitations."""
-    os.makedirs(REPORTS_DIR, exist_ok=True)
     comparison = compare_stats(before_stats, after_stats)
 
     lines = []
-    lines.append("# Cleaning Report - Video Game Sales (Member 1)")
+    lines.append("# Cleaning Report - Video Game Sales")
     lines.append("")
     lines.append("Source: `data/raw/vgsales.csv` (original download, unmodified).")
-    lines.append(f"Outputs: `data/processed/vgsales_cleaned.csv`, `{os.path.basename(REVIEW_FILE_PATH)}`.")
+    lines.append(f"Outputs: `data/processed/vgsales_cleaned.csv`, `{REVIEW_FILE_NAME}`.")
     lines.append("")
     lines.append("## 1. Before / after summary")
     lines.append("")
@@ -446,7 +429,7 @@ def write_cleaning_report(
     for entry in action_log:
         lines.append(f"- **[{entry['action']}] Rank {entry['rank']}** - {entry['reason']}")
     lines.append("")
-    lines.append("## 5. Known limitations passed to Members 2 and 3")
+    lines.append("## 5. Known limitations:")
     lines.append("")
     lines.append("- **Four records dated 2017 / 2020 are retained** (Ranks 5959/2020, 14393/2017, "
                  "16244/2017, 16441/2017). Their Year values are exactly as provided by the "
@@ -596,38 +579,40 @@ def dataframes_match(left_df, right_df):
 
 def verify_saved_output_files(
     cleaned_df, review_records, original_df,
-    staged_cleaned_path, staged_review_path, staged_report_path,
+    cleaned_path, review_path, report_path,
 ):
-    """Reload the staged files and verify their actual contents before publishing.
+    """Reload the published files and verify their actual contents.
 
     Checks row count, column order, Rank values, all sales values, the
     missing-Year pattern, the Int64 load path, report completeness, and the
-    staged review CSV against both the in-memory record and the raw record.
+    review CSV against both the in-memory record and the raw record.
     """
-    staged_paths = [staged_cleaned_path, staged_review_path, staged_report_path]
-    for path in staged_paths:
-        if not os.path.exists(path):
-            raise FileNotFoundError(f"Staged output file was not written: {path}")
-        if os.path.getsize(path) == 0:
-            raise ValueError(f"Staged output file is empty (incomplete): {path}")
+    output_paths = [cleaned_path, review_path, report_path]
+    for path in output_paths:
+        try:
+            with open(path, "rb") as handle:
+                if not handle.read():
+                    raise ValueError(f"Output file is empty (incomplete): {path}")
+        except FileNotFoundError:
+            raise FileNotFoundError(f"Output file was not written: {path}")
 
     problems = []
 
     try:
-        reloaded_cleaned = pd.read_csv(staged_cleaned_path, dtype={"Year": "Int64"})
+        reloaded_cleaned = pd.read_csv(cleaned_path, dtype={"Year": "Int64"})
 
         if len(reloaded_cleaned) != len(cleaned_df):
             problems.append(
-                f"staged cleaned CSV has {len(reloaded_cleaned)} rows, "
+                f"cleaned CSV has {len(reloaded_cleaned)} rows, "
                 f"intended {len(cleaned_df)}"
             )
         if int(reloaded_cleaned["Year"].isna().sum()) != 269:
             problems.append(
-                f"staged cleaned CSV has {int(reloaded_cleaned['Year'].isna().sum())} "
-                "missing Year values; the approved decisions produce 269"
+                f"cleaned CSV has {int(reloaded_cleaned['Year'].isna().sum())} "
+                "missing Year values, intended 269"
             )
         if list(map(int, reloaded_cleaned["Rank"])) != list(map(int, cleaned_df["Rank"])):
-            problems.append("staged cleaned CSV Rank values differ from the intended cleaned data")
+            problems.append("cleaned CSV Rank values differ from the intended cleaned data")
         reloaded_sales = {
             column: [float(value) for value in reloaded_cleaned[column]]
             for column in SALES_COLUMNS
@@ -638,25 +623,25 @@ def verify_saved_output_files(
         }
         for column in SALES_COLUMNS:
             if reloaded_sales[column] != intended_sales[column]:
-                problems.append(f"staged cleaned CSV sales values differ in {column}")
+                problems.append(f"cleaned CSV sales values differ in {column}")
         if not dataframes_match(reloaded_cleaned, cleaned_df):
-            problems.append("staged cleaned CSV does not reproduce the cleaned data in memory")
+            problems.append("cleaned CSV does not reproduce the cleaned data in memory")
     except Exception as section_error:
         raise ValueError(
-            f"staged cleaned CSV ({staged_cleaned_path}) is not a valid "
+            f"cleaned CSV ({cleaned_path}) is not a valid "
             f"cleaned dataset: {section_error}"
         ) from section_error
 
     try:
-        reloaded_review = pd.read_csv(staged_review_path)
+        reloaded_review = pd.read_csv(review_path)
         if not dataframes_match(reloaded_review, review_records):
-            problems.append("staged review CSV does not reproduce the quarantined records in memory")
+            problems.append("review CSV does not reproduce the quarantined records in memory")
         raw_quarantined = original_df[original_df["Rank"].isin(RANKS_TO_QUARANTINE)]
         if not dataframes_match(reloaded_review, raw_quarantined):
-            problems.append("staged review CSV does not match the original raw quarantined record")
+            problems.append("review CSV does not match the original raw quarantined record")
     except Exception as section_error:
         raise ValueError(
-            f"staged review CSV ({staged_review_path}) is not a valid "
+            f"review CSV ({review_path}) is not a valid "
             f"review file: {section_error}"
         ) from section_error
 
@@ -664,54 +649,33 @@ def verify_saved_output_files(
         raise ValueError("; ".join(problems))
 
     print(
-        f"Staged cleaned CSV verified: {len(reloaded_cleaned)} rows x "
+        f"Cleaned CSV verified: {len(reloaded_cleaned)} rows x "
         f"{len(reloaded_cleaned.columns)} columns (column order intact), "
         f"Rank values match, all 5 sales columns match, "
         f"missing Year = {int(reloaded_cleaned['Year'].isna().sum())}, "
         f"Int64 load successful"
     )
     print(
-        f"Staged review CSV verified: every field matches the in-memory record "
+        f"Review CSV verified: every field matches the in-memory record "
         f"and the original raw record (Rank(s) {reloaded_review['Rank'].tolist()})"
     )
 
 
-def publish_pending_outputs(pending_and_final_paths):
-    """Publish staged files onto final names with backup-and-rollback.
-
-    Each existing final file is moved to a .previous backup before the
-    staged file takes its place; if any rename fails, published files are
-    removed and backups restored, so outputs end fully updated or exactly
-    as before. Backups are deleted after a successful publish.
-    """
-    backups = []
-    published = []
-    try:
-        for pending_path, final_path in pending_and_final_paths:
-            backup_path = final_path + ".previous"
-            if os.path.exists(final_path):
-                os.replace(final_path, backup_path)
-                backups.append((backup_path, final_path))
-            os.replace(pending_path, final_path)
-            published.append(final_path)
-            print(f"Published: {final_path}")
-    except OSError:
-        print("Publication failed part-way - rolling back to the previous outputs.")
-        for final_path in published:
-            if os.path.exists(final_path):
-                os.remove(final_path)
-        for backup_path, final_path in backups:
-            os.replace(backup_path, final_path)
-        print("Rollback complete: every final output is back to its previous state.")
-        raise
-    for backup_path, _ in backups:
-        if os.path.exists(backup_path):
-            os.remove(backup_path)
+def snapshot_output_files(paths):
+    """Read the current output files into memory so a failed run can be undone."""
+    snapshot = {}
+    for path in paths:
+        try:
+            with open(path, "rb") as handle:
+                snapshot[path] = handle.read()
+        except FileNotFoundError:
+            pass
+    return snapshot
 
 
-def discard_pending_outputs(pending_paths):
-    """Delete staging files that were never published (after a failed run)."""
-    for path in pending_paths:
-        if os.path.exists(path):
-            os.remove(path)
-            print(f"Removed unpublished staging file: {path}")
+def restore_output_files(snapshot):
+    """Rewrite the previous contents of output files (rollback after a failed run)."""
+    for path, content in snapshot.items():
+        with open(path, "wb") as handle:
+            handle.write(content)
+    print("Rollback complete: every output was restored to its previous state.")

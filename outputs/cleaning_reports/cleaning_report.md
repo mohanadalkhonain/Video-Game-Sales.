@@ -1,4 +1,7 @@
-# Cleaning Report - Video Game Sales
+# Cleaning Report - Video Game Sales (Member 1)
+
+Source: `data/raw/vgsales.csv`.
+Outputs: `data/processed/vgsales_cleaned.csv`, `records_requiring_review.csv`.
 
 ## 1. Before / after summary
 
@@ -104,7 +107,7 @@ Check: raw total = cleaned total + quarantined + removed. A difference of 0.00 p
 - **[validated sales columns] Rank all** - no negatives, no missing, no text; zeros kept as genuine sales
 - **[checked Genre/Platform/Publisher labels] Rank all** - no rewrites applied; findings: {'Genre': {'unique_values': 12, 'whitespace_issues': 0, 'case_variant_groups': []}, 'Platform': {'unique_values': 31, 'whitespace_issues': 0, 'case_variant_groups': []}, 'Publisher': {'unique_values': 578, 'whitespace_issues': 0, 'case_variant_groups': []}}
 
-## 5. Known limitations
+## 5. Known limitations passed to Members 2 and 3
 
 - **Four records dated 2017 / 2020 are retained** (Ranks 5959/2020, 14393/2017, 16244/2017, 16441/2017). Their Year values are exactly as provided by the source and have **not been independently verified**; they are documented as potential temporal inconsistencies. The dataset does **not** establish 2016 as a confirmed data coverage cutoff. Impact check (Stage A): excluding these four records changes none of the leading genre-platform combinations or regional rankings; their combined Global_Sales is 0.34M.
 - **269 missing Year values are preserved** as missing (empty cells in the cleaned CSV; the raw file had 271, of which 2 belonged to a removed and a quarantined record). They must not become zero and rows are not deleted for it.
