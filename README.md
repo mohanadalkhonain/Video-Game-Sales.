@@ -28,7 +28,6 @@ video_game_sales_project/
 ├── src/data_cleaning.py        # Reusable Pandas cleaning functions
 ├── notebooks/                  # Stage A audit scripts (read-only checks)
 ├── main.py                     # Runs the whole cleaning workflow
-├── requirements.txt
 └── README.md
 ```
 
