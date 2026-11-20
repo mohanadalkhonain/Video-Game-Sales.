@@ -1,6 +1,6 @@
 # Dataset Audit Report - Video Game Sales (vgsales.csv)
 
-Source file: `vgsales.csv`
+Source file: `vgsales.csv` (placed manually in `data/raw/` after downloading from Kaggle)
 
 ## 1. Structure
 - Rows: **16598**
@@ -89,6 +89,7 @@ Worst rows:
 ## 8. Extra observations
 - Unique game titles: 11493
 - Rows whose title appears on more than one platform (legitimate): 5105
+- Invisible-character check: the raw file contains exactly one Unicode U+200B ZERO WIDTH SPACE (at the end of Rank 11595's `Name`), confirmed by character-by-character inspection. It is documented in `cleaning_report.md`; removal from the text columns happens in the cleaning workflow, while every other Unicode character is preserved.
 
 Rows with a missing Publisher:
 ```

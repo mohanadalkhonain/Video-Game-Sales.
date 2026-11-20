@@ -136,7 +136,14 @@ def audit_dataset(df):
 
 
 def save_audit_report(findings, csv_path):
-    """Write the audit report as a Markdown file the team can read."""
+    """Write the audit report as a readable Markdown file.
+
+    dataset_audit.md is manually maintained, so this function never silently
+    overwrites it: if the file already exists and differs from the freshly
+    generated report, the generated report is written to
+    dataset_audit_generated.md instead and the manual file is left untouched.
+    An identical file (or a missing one) is written as before.
+    """
     report_path = AUDIT_REPORT_PATH
 
     lines = []
@@ -208,6 +215,11 @@ def save_audit_report(findings, csv_path):
     lines.append("## 8. Extra observations")
     lines.append(f"- Unique game titles: {findings['name_count_unique']}")
     lines.append(f"- Rows whose title appears on more than one platform (legitimate): {findings['games_on_multiple_platforms']}")
+    lines.append("- Invisible-character check: the raw file contains exactly one Unicode "
+                 "U+200B ZERO WIDTH SPACE (at the end of Rank 11595's `Name`), confirmed "
+                 "by character-by-character inspection. It is documented in "
+                 "`cleaning_report.md`; removal from the text columns happens in the "
+                 "cleaning workflow, while every other Unicode character is preserved.")
     lines.append("")
     lines.append("Rows with a missing Publisher:")
     lines.append("```")
@@ -215,8 +227,30 @@ def save_audit_report(findings, csv_path):
     lines.append("```")
     lines.append("")
 
+    content = "\n".join(lines)
+
+    existing = None
+    try:
+        with open(report_path, encoding="utf-8") as report_file:
+            existing = report_file.read()
+    except FileNotFoundError:
+        pass
+
+    if existing is not None and existing != content:
+        generated_path = report_path.replace(
+            "dataset_audit.md", "dataset_audit_generated.md"
+        )
+        with open(generated_path, "w", encoding="utf-8") as report_file:
+            report_file.write(content)
+        print(
+            f"NOT overwriting {report_path}: it is manually maintained and "
+            "differs from the generated audit. The generated report was "
+            f"written to {generated_path} instead."
+        )
+        return generated_path
+
     with open(report_path, "w", encoding="utf-8") as report_file:
-        report_file.write("\n".join(lines))
+        report_file.write(content)
     print("Audit report written to:", report_path)
     return report_path
 

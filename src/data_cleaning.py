@@ -16,6 +16,11 @@ SALES_COLUMNS = [
     "NA_Sales", "EU_Sales", "JP_Sales", "Other_Sales", "Global_Sales",
 ]
 
+# Text columns the zero-width-space rule applies to.
+TEXT_COLUMNS = ["Name", "Platform", "Genre", "Publisher"]
+
+ZERO_WIDTH_SPACE = chr(0x200B)  # U+200B ZERO WIDTH SPACE, built explicitly so no invisible character sits in the source
+
 # Rank -> reason, quoted verbatim in the cleaning report.
 RANKS_TO_REMOVE = {
     16130: (
@@ -132,6 +137,41 @@ def remove_duplicate_records(df):
     return df[keep_mask].copy()
 
 
+def remove_zero_width_spaces(df):
+    """Remove U+200B ZERO WIDTH SPACE from the text columns.
+
+    Approved correction: Rank 11595 carries a trailing U+200B inherited
+    from the original Kaggle download. Only U+200B is removed - no other
+    character, no whitespace strip, no case change - so every other Unicode
+    character and all other text is preserved exactly. The quarantined review
+    records are NOT touched by this rule: they must stay exactly as they
+    appeared in the raw data.
+    """
+    df = df.copy()
+    affected = {}
+    for column in TEXT_COLUMNS:
+        not_missing = df[column].notna()
+        contains_zwsp = not_missing & df[column].str.contains(
+            ZERO_WIDTH_SPACE, regex=False, na=False
+        )
+        if contains_zwsp.any():
+            affected[column] = sorted(map(int, df.loc[contains_zwsp, "Rank"]))
+            df.loc[contains_zwsp, column] = (
+                df.loc[contains_zwsp, column].str.replace(
+                    ZERO_WIDTH_SPACE, "", regex=False
+                )
+            )
+    remaining = sum(
+        int(df[column].str.contains(ZERO_WIDTH_SPACE, regex=False, na=False).sum())
+        for column in TEXT_COLUMNS
+    )
+    if remaining:
+        raise AssertionError(
+            f"Zero-width space removal left {remaining} occurrence(s) in place"
+        )
+    return df, affected
+
+
 def convert_year_to_integer(df):
     """Convert Year float64 -> nullable Int64, keeping missing values as NA.
 
@@ -215,6 +255,23 @@ def clean_data(df):
     cleaned_df = remove_duplicate_records(remaining_df)
     for rank, reason in RANKS_TO_REMOVE.items():
         action_log.append({"rank": rank, "action": "removed", "reason": reason})
+
+    cleaned_df, zwsp_affected = remove_zero_width_spaces(cleaned_df)
+    total_affected_cells = sum(len(ranks) for ranks in zwsp_affected.values())
+    cell_phrase = "One text cell" if total_affected_cells == 1 else f"{total_affected_cells} text cell(s)"
+    affected_text = "; ".join(
+        f"{column}: Rank(s) {ranks}" for column, ranks in zwsp_affected.items()
+    ) or "none found"
+    action_log.append({
+        "rank": "11595" if zwsp_affected else "all",
+        "action": "removed U+200B zero-width space from text columns",
+        "reason": (
+            f"{cell_phrase} contained U+200B ZERO WIDTH SPACE inherited from "
+            f"the original Kaggle download ({affected_text}). "
+            f"Only U+200B was removed; every other Unicode character was "
+            f"preserved. Confirmed 0 occurrences remain."
+        ),
+    })
 
     cleaned_df, year_missing_before, year_missing_after = convert_year_to_integer(cleaned_df)
     action_log.append({
@@ -325,10 +382,10 @@ def write_cleaning_report(
     after_stats,
     action_log,
     original_df,
+    cleaned_df,
     removed_rows,
     review_df,
     reconciliation,
-    original_row_count,
     report_path=CLEANING_REPORT_PATH,
 ):
     """Write the Markdown cleaning report: before/after statistics, a
@@ -339,7 +396,7 @@ def write_cleaning_report(
     lines = []
     lines.append("# Cleaning Report - Video Game Sales")
     lines.append("")
-    lines.append("Source: `data/raw/vgsales.csv` (original download, unmodified).")
+    lines.append("Source: `data/raw/vgsales.csv`.")
     lines.append(f"Outputs: `data/processed/vgsales_cleaned.csv`, `{REVIEW_FILE_NAME}`.")
     lines.append("")
     lines.append("## 1. Before / after summary")
@@ -401,15 +458,93 @@ def write_cleaning_report(
         lines.append(f"- **Reason:** {RANKS_TO_QUARANTINE[int(row['Rank'])]}")
         lines.append("- **Potential effect on regional totals if ever re-added:** "
                      "adds NA 0.00M, EU 0.48M, JP 0.00M, Other 0.00M, Global 0.48M "
-                     "(EU total would rise by 0.48M and the Action/PS3 EU combination "
+                     "(EU total would rise by 0.48M and the Platform/PS3 EU combination "
                      "would gain 0.48M - it is kept out of the primary dataset until "
                      "reviewed because its EU figure contradicts Rank 1717's 0.07M).")
+        if int(row["Rank"]) == 4147:
+            lines.append(
+                "- **Platform verification (evidence-based review):** both "
+                "records were checked directly against the raw data. Rank "
+                "1717 is the same game on the SAME platform as Rank 4147: "
+                "Sonic the Hedgehog, PS3, Year 2006, Genre Platform, "
+                "Publisher Sega, sales NA 0.41 / EU 0.07 / JP 0.04 / "
+                "Other 0.66 / Global 1.18. Comparing the two PS3 records' "
+                "sales is therefore valid: one title on one platform should "
+                "not appear twice with different figures."
+            )
+            lines.append(
+                "- **Record-shape context:** Rank 4147 carries a single "
+                "nonzero regional figure (EU 0.48) with all other regions at "
+                "0.0, plus missing Year AND Publisher - the same "
+                "partial-tracking-entry pattern as Rank 16130 (Madden NFL "
+                "13), not a complete release record. The 1991 Genesis "
+                "original (Rank 255) and the 2006 X360 release (Rank 1985) "
+                "are separate, legitimate releases on different platforms "
+                "and are not part of this duplicate pair."
+            )
+            lines.append(
+                "- **Decision re-checked:** the quarantine reasons stand as "
+                "verified (same title + same platform duplicate with "
+                "inconsistent figures, and missing Year and Publisher); the "
+                "record remains quarantined, its status unchanged."
+            )
         raw_index = int(original_df.index[original_df["Rank"] == int(row["Rank"])][0])
         lines.append("- Row as it appeared in the raw data (pandas row index "
                      f"{raw_index}; CSV line {raw_index + 2} with the header included):")
         lines.append("```")
         lines.append(row.to_string())
         lines.append("```")
+        lines.append("")
+
+    #U+200B correction, documented at record level.
+    zwsp_cells = []
+    for zwsp_column in TEXT_COLUMNS:
+        zwsp_mask = original_df[zwsp_column].notna() & original_df[zwsp_column].str.contains(
+            ZERO_WIDTH_SPACE, regex=False, na=False
+        )
+        zwsp_cells.extend(
+            (int(rank_value), zwsp_column)
+            for rank_value in original_df.loc[zwsp_mask, "Rank"]
+        )
+    for rank_value, zwsp_column in sorted(zwsp_cells):
+        zwsp_before = original_df.loc[original_df["Rank"] == rank_value, zwsp_column].iloc[0]
+        zwsp_after = zwsp_before.replace(ZERO_WIDTH_SPACE, "")
+        fields_except_one_match = dataframes_match(
+            original_df.loc[original_df["Rank"] == rank_value].drop(columns=[zwsp_column]),
+            cleaned_df.loc[cleaned_df["Rank"] == rank_value].drop(columns=[zwsp_column]),
+        )
+        lines.append(
+            f"### Cleaned in place (record kept) - Rank {rank_value} "
+            f"({zwsp_column}: U+200B removed)"
+        )
+        lines.append("")
+        lines.append(
+            f"- **What:** the end of the `{zwsp_column}` field carried a "
+            "U+200B ZERO WIDTH SPACE, an invisible Unicode format character "
+            "(category Cf) that cannot be seen when the text is viewed "
+            "normally. It appears in `repr()` as `\\u200b`."
+        )
+        lines.append(
+            "- **Origin:** the character was present in the original Kaggle "
+            "dataset (`gregorut/videogamesales`) and passed through the "
+            "earlier cleaning stages untouched."
+        )
+        lines.append(
+            "- **Rule applied:** the cleaning workflow now removes U+200B "
+            "from the text columns via `remove_zero_width_spaces()`. Only "
+            "U+200B is removed: no other Unicode character, no whitespace "
+            "strip and no case change - every other character of the text, "
+            "legitimate Unicode included, is preserved exactly."
+        )
+        lines.append(f"- `{zwsp_column}` before (repr view): `{ascii(zwsp_before)}`")
+        lines.append(f"- `{zwsp_column}` after  (repr view): `{ascii(zwsp_after)}`")
+        lines.append(
+            "- **All other fields of this record are unchanged** from the "
+            "raw data."
+            if fields_except_one_match else
+            "- **Note:** other fields of this record also differ from the "
+            "raw data because of the Year dtype conversion."
+        )
         lines.append("")
     lines.append("## 3. Sales reconciliation (before vs after)")
     lines.append("")
@@ -429,7 +564,7 @@ def write_cleaning_report(
     for entry in action_log:
         lines.append(f"- **[{entry['action']}] Rank {entry['rank']}** - {entry['reason']}")
     lines.append("")
-    lines.append("## 5. Known limitations:")
+    lines.append("## 5. Known limitations")
     lines.append("")
     lines.append("- **Four records dated 2017 / 2020 are retained** (Ranks 5959/2020, 14393/2017, "
                  "16244/2017, 16441/2017). Their Year values are exactly as provided by the "
@@ -448,6 +583,12 @@ def write_cleaning_report(
                  "consistent with rounding (values reported to 2 decimals). No transformation was applied.")
     lines.append("- **Zero sales are genuine sales information** (e.g. ~10.4k games never sold in "
                  "Japan) and were kept as zeros, not treated as missing.")
+    lines.append("- **One invisible character was removed**: a U+200B "
+                 "zero-width space at the end of Rank 11595's Name, inherited from the "
+                 "original Kaggle dataset (see the record-level section above). The "
+                 "`remove_zero_width_spaces()` rule strips only U+200B from the text "
+                 "columns (Name, Platform, Genre, Publisher); no other Unicode character, "
+                 "whitespace or text was altered, and no other record contained it.")
     lines.append("- **CSV does not preserve pandas dtypes**: after saving, Year reads back as "
                  "float64 with NaN. Restore it with "
                  "`pd.read_csv(\"data/processed/vgsales_cleaned.csv\", dtype={\"Year\": \"Int64\"})`.")
@@ -461,7 +602,7 @@ def write_cleaning_report(
 
 
 def validate_outputs(original_df, cleaned_df, review_df):
-    """Run the 10-point validation checklist; returns (passed, reconciliation, checks)."""
+    """Run the validation checklist (12 checks); returns (passed, reconciliation, checks)."""
     checks = []
 
     def record_check(description, passed, detail=""):
@@ -528,6 +669,31 @@ def validate_outputs(original_df, cleaned_df, review_df):
         len(future_years) == 4
         and sorted(future_years["Year"].tolist()) == [2017, 2017, 2017, 2020],
         f"Ranks {future_years['Rank'].tolist()}"
+    )
+
+    zwsp_remaining = sum(
+        int(cleaned_df[column]
+            .str.contains(ZERO_WIDTH_SPACE, regex=False, na=False).sum())
+        for column in TEXT_COLUMNS
+    )
+    record_check(
+        "U+200B zero-width space absent from all text columns",
+        zwsp_remaining == 0,
+        f"{zwsp_remaining} occurrence(s) remain in Name/Platform/Genre/Publisher",
+    )
+
+    rank_11595_raw = original_df.loc[original_df["Rank"] == 11595, "Name"]
+    rank_11595_cleaned = cleaned_df.loc[cleaned_df["Rank"] == 11595, "Name"]
+    name_11595_preserved = (
+        len(rank_11595_raw) == len(rank_11595_cleaned) == 1
+        and rank_11595_cleaned.iloc[0]
+        == rank_11595_raw.iloc[0].replace(ZERO_WIDTH_SPACE, "")
+    )
+    record_check(
+        "Rank 11595 Name preserved except the removed U+200B",
+        name_11595_preserved,
+        f"{len(rank_11595_raw.iloc[0])} chars raw -> "
+        f"{len(rank_11595_cleaned.iloc[0]) if len(rank_11595_cleaned) else 'MISSING'} chars cleaned",
     )
 
     removed_rows = original_df[original_df["Rank"].isin(RANKS_TO_REMOVE)]
@@ -624,6 +790,15 @@ def verify_saved_output_files(
         for column in SALES_COLUMNS:
             if reloaded_sales[column] != intended_sales[column]:
                 problems.append(f"cleaned CSV sales values differ in {column}")
+        saved_zwsp = sum(
+            int(reloaded_cleaned[column]
+                .str.contains(ZERO_WIDTH_SPACE, regex=False, na=False).sum())
+            for column in TEXT_COLUMNS
+        )
+        if saved_zwsp:
+            problems.append(
+                f"saved cleaned CSV still contains U+200B in {saved_zwsp} text cell(s)"
+            )
         if not dataframes_match(reloaded_cleaned, cleaned_df):
             problems.append("cleaned CSV does not reproduce the cleaned data in memory")
     except Exception as section_error:

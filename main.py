@@ -66,10 +66,10 @@ def main():
             after_stats=after_stats,
             action_log=action_log,
             original_df=original_df,
+            cleaned_df=cleaned_df,
             removed_rows=removed_rows,
             review_df=review_records,
             reconciliation=reconciliation,
-            original_row_count=before_stats["rows"],
         )
 
         print("\nVerifying the saved files' actual contents...")
