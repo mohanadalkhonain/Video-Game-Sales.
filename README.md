@@ -28,17 +28,7 @@ video_game_sales_project/
 ├── src/data_cleaning.py        # Reusable Pandas cleaning functions
 ├── notebooks/                  # Stage A audit scripts (read-only checks)
 ├── main.py                     # Runs the whole cleaning workflow
-├── requirements.txt
 └── README.md
-```
-
-## How to run
-
-Run the commands from the project folder (all file paths are relative):
-
-```bash
-py -m pip install -r requirements.txt   # pandas
-py main.py
 ```
 
 Before running, download the dataset manually from Kaggle
